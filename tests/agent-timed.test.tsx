@@ -522,11 +522,36 @@ test('the band: Agent-timed switched off while the agent holds: the hold goes an
 test('the band: a narrow chat keeps every control, wrapped', async ($, on) => {
   world(on, { value: 16 })
   await $.session.start(START)
+  type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  // the controls' row, the box that holds it, and the keys of every control in it
+  const layout = (tree: unknown) => {
+    let found: { row: Node; holder: Node } | undefined
+    const walk = (n: unknown, parent: Node | undefined) => {
+      if (!n || typeof n !== 'object') return
+      const node = n as Node
+      if (node.props?.flexWrap === 'wrap' && JSON.stringify(node).includes('"key":"compact"') && !found) found = { row: node, holder: parent! }
+      for (const c of node.children ?? []) walk(c, node)
+    }
+    walk(tree, undefined)
+    const keys = [...JSON.stringify(found!.row).matchAll(/"key":"([^"]+)"/g)].map(m => m[1]!.replace(/\d+$/, ''))
+    return { ...found!, keys: [...new Set(keys)] }
+  }
   for (const surface of SURFACES) {
+    const wide = await $.ui.mount({ plugin: 'headroom', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 200 } })
+    const beside = layout(await wide.drawn())
+    await wide.unmount()
     const ui = await $.ui.mount({ plugin: 'headroom', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 40 } })
-    expect(await ui.find({ type: 'Text', text: 'Agent-timed from' })).toBeDefined()
+    const narrow = layout(await ui.drawn())
+
+    // wide, the controls sit in the headline's row; narrow, on a row of their own beneath
+    // it, a row that wraps onto more lines as it needs
+    expect(beside.holder.props?.flexDirection).toBe('row')
+    expect(narrow.holder.props?.flexDirection).not.toBe('row')
+    expect(narrow.row.props?.flexWrap).toBe('wrap')
+    // and none is lost: every control the wide band has, the narrow one has too
+    expect(narrow.keys).toEqual(beside.keys)
+    expect(narrow.keys).toEqual(expect.arrayContaining(['auto', 'autoAt', 'timed', 'startAt', 'warm', 'compact', 'collapse']))
     expect((await startKey(ui))?.props.value).toBe('30')
-    expect(await ui.find({ key: 'compact' })).toBeDefined()
     await ui.unmount()
   }
 })
