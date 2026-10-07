@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   ASK_MIN, AT_DEFAULT, EMPTY, NOTE_MAX, NUDGE_EVERY, REASON_MAX,
-  afterText, answerTool, breakpointOf, capOf, decide, figures, isTimed, nudgeLevel, startOf, stepNudge, toldText, withNote,
+  afterText, answerTool, breakpointOf, capOf, decide, figures, isTimed, nudgeLevel, nudgeText, startOf, stepNudge, toldText, withNote,
 } from '../hooks/agent-policy'
 import type { DecideInput, ToolContext } from '../hooks/agent-policy'
 
@@ -122,11 +122,28 @@ test('breakpoints: only a run whose exit status is the command\'s, so a pipe or 
 })
 
 test('texts: every number names what it measures', () => {
-  expect(figures(41.2, 30, 80)).toBe('Context 41%. Agent-timed compaction starts at 30%; at 80% it runs whatever is held.')
-  expect(toldText(31, 30, 80)).toBe(
-    'Agent-timed compaction: context is at 31% (starts at 30%, cap 80%). This conversation will be compacted when your turn ends. ' +
-      'If you are mid-task, call the compaction tool with action "hold" and a reason. Otherwise save a "note" of what must survive. Asking the user a question does not end your turn.',
-  )
+  // each figure, beside the words that name it: the context's %, the start %, the cap %
+  const named = (text: string): Record<string, number[]> => ({
+    context: [...text.matchAll(/[Cc]ontext (?:is at )?(\d+)%/g)].map(m => Number(m[1])),
+    start: [...text.matchAll(/starts at (\d+)%/g)].map(m => Number(m[1])),
+    // the cap: "cap 80%", "; at 80% it runs", "At 80% compaction runs"
+    cap: [...text.matchAll(/(?:cap |; at |At )(\d+)%/g)].map(m => Number(m[1])),
+  })
+  // three figures apart from each other, the context's with a fraction to round
+  for (const [percent, startAt, cap] of [[41.2, 30, 80], [55.7, 50, 90], [72.5, 65, 75]] as const) {
+    const context = Math.round(percent)
+    const texts = [figures(percent, startAt, cap), toldText(percent, startAt, cap), nudgeText(3, percent, startAt, cap, 'x'), nudgeText(2, percent, startAt, cap, 'x')]
+    for (const text of texts) {
+      // no number in the text but the three, each where its words say
+      const all = [...text.matchAll(/\d+(?:\.\d+)?/g)].map(m => Number(m[0]))
+      const { context: c, start, cap: k } = named(text)
+      expect({ text, numbers: [...all].sort((a, b) => a - b) }).toEqual({ text, numbers: [...c, ...start, ...k].sort((a, b) => a - b) })
+      expect({ text, c, start }).toEqual({ text, c: c.map(() => context), start: start.map(() => startAt) })
+      expect({ text, k }).toEqual({ text, k: k.map(() => cap) })
+      // every text gives all three
+      expect({ text, c: c.length > 0, start: start.length > 0, k: k.length > 0 }).toEqual({ text, c: true, start: true, k: true })
+    }
+  }
 })
 
 test('the note joins the instructions once, however often it is added', () => {
