@@ -135,12 +135,16 @@ const TESTS = new RegExp(
     ')' +
     END,
 )
-const SEGMENTS = /&&|\|\||[;|&\n]/
+// the operators between shell segments; the & of a redirect such as 2>&1 is not one
+const SEGMENTS = /(&&|\|\||(?<![<>])&(?!>)|[;|\n])/
 
 // Which natural breakpoint a Bash command that succeeded was: read one shell segment
-// at a time, so "echo git commit" and a --dry-run are not one.
+// at a time, so "echo git commit" and a --dry-run are not one. A segment counts only
+// when the command's exit status is its own, last or followed by &&: piped into grep,
+// or followed by ; or ||, a failed run still ends the command with success.
 export function breakpointOf(command: string): 'commit' | 'tests' | null {
-  const segments = command.split(SEGMENTS).filter(s => s.trim() !== '')
+  const parts = command.replace(/[\s;]+$/, '').split(SEGMENTS)
+  const segments = parts.filter((s, i) => i % 2 === 0 && s.trim() !== '' && (parts[i + 1] ?? '&&') === '&&')
   if (segments.some(s => COMMIT.test(s) && !s.includes('--dry-run'))) return 'commit'
   if (segments.some(s => TESTS.test(s))) return 'tests'
   return null

@@ -107,6 +107,20 @@ test('breakpoints: a commit or a test run, in command position, never a dry run 
   for (const [command, kind] of cases) expect({ command, kind: breakpointOf(command) }).toEqual({ command, kind })
 })
 
+test('breakpoints: only a run whose exit status is the command\'s, so a pipe or a later command cannot hide a failure', () => {
+  const cases: [string, string | null][] = [
+    ['claude plugin test . 2>&1 | grep -E "pass|fail"', null],
+    ['npx jest | tail -20', null],
+    ['npx jest; echo done', null],
+    ['npx jest || true', null],
+    ['git commit -m x | tail -1', null],
+    ['npx jest && echo ok', 'tests'],
+    ['cd app && npx jest', 'tests'],
+    ['git commit -m x && git push', 'commit'],
+  ]
+  for (const [command, kind] of cases) expect({ command, kind: breakpointOf(command) }).toEqual({ command, kind })
+})
+
 test('texts: every number names what it measures', () => {
   expect(figures(41.2, 30, 80)).toBe('Context 41%. Agent-timed compaction starts at 30%; at 80% it runs whatever is held.')
   expect(toldText(31, 30, 80)).toBe(
