@@ -414,18 +414,43 @@ test('a failed usage check says why, backs off, and the newest reply figures sho
 })
 
 test('the back-off is shared: a refusal in one chat holds the others, and Retry-After is kept', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  mock.store(on, { planBackoff: { until: NOW + 10 * 60_000, failures: 3, error: 'refused (429)' } })
-  let asks = 0
+  const clock = mock.clock(on, { now: NOW })
+  // the store every chat reads: another chat's third refusal holds asks for 10 minutes
+  const stored = new Map<string, unknown>([['planBackoff', { until: NOW + 10 * MIN, failures: 3, error: 'refused (429)' }]])
+  on('store.get', (_$, e) => ({ value: stored.get(e.key) }) as never)
+  on('store.set', (_$, e) => {
+    stored.set(e.key, e.value)
+    return { value: undefined } as never
+  })
+  // when each ask went out; each is refused, asking for 10 minutes' rest
+  const asks: number[] = []
   on('session.usage', () => ({ value: usage([]) }))
   on('session.authorize', () => ({ value: { handle: 'h', kind: 'bearer' } }))
-  on('http.fetch', () => {
-    asks += 1
+  on('http.fetch', async () => {
+    asks.push(await clock.now())
     return { value: { status: 429, ok: false, headers: { 'Retry-After': '600' }, text: '' } } as never
   })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', () => ({ value: { command: 'headroom' } }))
   answerRestNoPlan(on)
-  await $.session.measure(MEASURE)
-  expect(asks).toBe(0)
+  await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+
+  // this chat's own 2-minute asks wait out the other chat's refusal
+  await clock.advance(10 * MIN - 1)
+  expect(asks).toEqual([])
+  await clock.advance(2 * MIN + 1)
+  expect(asks).toHaveLength(1)
+  const first = asks[0]!
+  expect(first).toBeGreaterThanOrEqual(NOW + 10 * MIN)
+
+  // the fourth refusal: held for Retry-After's 10 minutes, not the back-off's own 15, and
+  // stored for every chat
+  expect(stored.get('planBackoff')).toEqual({ until: first + 10 * MIN, failures: 4, error: 'refused (429)' })
+  await clock.advance(first + 10 * MIN - 1 - (await clock.now()))
+  expect(asks).toHaveLength(1)
+  await clock.advance(2 * MIN + 1)
+  expect(asks).toHaveLength(2)
+  expect(asks[1]!).toBeLessThan(first + 15 * MIN)
 })
 
 test('after /compact, before any reply, the exact count is shown', async ($, on) => {
