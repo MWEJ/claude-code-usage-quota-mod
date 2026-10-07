@@ -267,16 +267,30 @@ for (const [name, w, ttl] of LIFETIMES) {
 }
 
 
-test('a chosen lifetime is set in the variable at once, warming on or off; auto sets nothing', async ($, on) => {
-  const { seen } = world(on, { saved: { isOn: true, ttl: '1h' } })
-  await $.session.start(START)
-  expect(seen.envSets).toEqual([['CLAUDE_CODE_PROMPT_CACHE_TTL', '1h']])
-})
+// at a session's start, the saved pick and what goes in the variable
+const AT_START: [string, { isOn: boolean; ttl: 'auto' | '5m' | '1h' }, [string, string][]][] = [
+  ['a chosen 1h, warming on, is set at once', { isOn: true, ttl: '1h' }, [['CLAUDE_CODE_PROMPT_CACHE_TTL', '1h']]],
+  ['a chosen 5m is set with warming off too: the dropdown is the chat\'s, not the warmer\'s', { isOn: false, ttl: '5m' }, [['CLAUDE_CODE_PROMPT_CACHE_TTL', '5m']]],
+  ['auto, warming on, sets nothing', { isOn: true, ttl: 'auto' }, []],
+]
+for (const [name, saved, sets] of AT_START) {
+  test(`the lifetime at start: ${name}`, async ($, on) => {
+    const { seen } = world(on, { saved })
+    await $.session.start(START)
+    expect(seen.envSets).toEqual(sets)
+  })
+}
 
-test('a chosen lifetime is set with warming off too: the dropdown is the chat\'s, not the warmer\'s', async ($, on) => {
-  const { seen } = world(on, { saved: { isOn: false, ttl: '5m' } })
+test('auto after a chosen lifetime puts back the value the variable had before the mod set it', async ($, on) => {
+  const { seen } = world(on, { saved: { isOn: true, ttl: '1h' }, env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '5m' } })
   await $.session.start(START)
-  expect(seen.envSets).toEqual([['CLAUDE_CODE_PROMPT_CACHE_TTL', '5m']])
+  const ui = await $.ui.mount({ plugin: 'headroom', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  await ui.select({ key: 'cacheTtl', value: 'auto' })
+  expect(seen.envSets).toEqual([
+    ['CLAUDE_CODE_PROMPT_CACHE_TTL', '1h'],
+    ['CLAUDE_CODE_PROMPT_CACHE_TTL', '5m'],
+  ])
+  await ui.unmount()
 })
 
 test('the chain is forgotten by a compaction, a /clear, the session ending and a model switch', async ($, on) => {
@@ -331,15 +345,31 @@ test('the rate: the meter jump per dollar is learned at each turn end, logged, a
   expect(Math.abs((rate.five_hour?.usd ?? 0) - 0.0538)).toBeLessThan(1e-9)
 })
 
-test('the totals: this session and all time, refreshes and what they cost', async ($, on) => {
+test("the totals: this session's start afresh in another chat, all time's keep adding up, refreshes and what they cost", async ($, on) => {
   const { clock, seen, stored } = world(on)
+  // the chat's id, as the session answers it: a /clear goes on under a new one
+  let chat = 'chat'
+  on('session.id', () => ({ value: chat }) as never)
+  const allTime = () => stored.get('warmAllTime') as { refreshes: number; costUsd: number }
   await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'headroom', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
   await prompt($, clock, seen)
   await clock.advance(270_000)
   await clock.advance(270_000)
-  const allTime = stored.get('warmAllTime') as { refreshes: number; costUsd: number }
-  expect(allTime.refreshes).toBe(2)
-  expect(Math.abs(allTime.costUsd - 2 * 0.043852)).toBeLessThan(1e-9)
+  expect(await cacheText(ui)).toMatch(/ · 2 refreshes this session, \$0\.09$/)
+  expect(allTime().refreshes).toBe(2)
+  expect(Math.abs(allTime().costUsd - 2 * 0.043852)).toBeLessThan(1e-9)
+
+  // another chat: its own totals from nothing, all time's going on from the first chat's
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+  chat = 'next'
+  await clock.advance(3_000)
+  await prompt($, clock, seen)
+  await clock.advance(270_000)
+  expect(await cacheText(ui)).toMatch(/ · 1 refresh this session, \$0\.04 · 3 refreshes all time, \$0\.13$/)
+  expect(allTime().refreshes).toBe(3)
+  expect(Math.abs(allTime().costUsd - 3 * 0.043852)).toBeLessThan(1e-9)
+  await ui.unmount()
 })
 
 // the band, on both surfaces it draws on
