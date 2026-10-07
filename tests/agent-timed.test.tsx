@@ -462,8 +462,9 @@ test('the band: the hold shows with who, how long and why; Release ends it, and 
 
   // Compact now, mid-turn: it waits for the turn's end, and says so
   await into($, clock, percent, 35)
+  // the reason whole, wrapped, however long: it is what the person reads to decide on Release
   await tool($, { action: 'hold', reason: 'x'.repeat(200) })
-  expect((await ui.find({ type: 'Text', text: /^Held by Claude/ }))?.text).toBe(`Held by Claude 0m: ${'x'.repeat(79)}…`)
+  expect((await ui.find({ type: 'Text', text: /^Held by Claude/ }))?.text).toBe(`Held by Claude 0m: ${'x'.repeat(200)}`)
   await ui.press({ key: 'compact' })
   expect(await ui.find({ type: 'Text', text: 'Compacting when this turn ends' })).toBeDefined()
   expect(seen.compacted).toHaveLength(1)

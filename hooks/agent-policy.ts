@@ -31,9 +31,8 @@ export const START_DEFAULT = 30
 // a chat that never had a setting: Auto compact on at the cap, Agent-timed on from the start %
 export const DEFAULT_AUTO: AutoCompact = { isOn: true, at: AT_DEFAULT, isAgentTimed: true, startAt: START_DEFAULT }
 export const NOTE_MAX = 4_000
-// a reason is kept to this, and drawn in the band to less
+// a reason is kept to this
 export const REASON_MAX = 500
-export const REASON_SHOWN = 80
 // "compact" under this context % is refused: there is nothing worth compacting
 export const ASK_MIN = 10
 // within this many points of the cap, a holding agent is told the cap is close

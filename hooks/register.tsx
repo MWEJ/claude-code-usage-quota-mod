@@ -3,7 +3,7 @@ import type { EngineInterface, ModelForkResult, ModelUsage, Register, SessionRat
 
 import type { AgentTimed, AutoCompact, Category, Limit, PaceOf, Snapshot, Ttl, TtlChoice, Warm, WarmAnchor, WarmRate, WarmSetting, WarmTotals } from '../types'
 import {
-  AT_DEFAULT, DEFAULT_AUTO, EMPTY, HOLD_REMIND_MS, REASON_SHOWN, START_DEFAULT, START_MIN, TOOL, TOOL_DESCRIPTION, TOOL_NAME, TOOL_SCHEMA,
+  AT_DEFAULT, DEFAULT_AUTO, EMPTY, HOLD_REMIND_MS, START_DEFAULT, START_MIN, TOOL, TOOL_DESCRIPTION, TOOL_NAME, TOOL_SCHEMA,
   afterText, answerTool, breakpointOf, breakpointText, capOf, decide, holdReminder, isTimed, nudgeLevel, nudgeText, startOf, stepNudge, toldText, waitReminder, withNote,
 } from './agent-policy'
 import type { Stuck, ToolInput } from './agent-policy'
@@ -1967,11 +1967,10 @@ export const register: Register = (on, options) => {
     const ASK_LABELS = ['Now', 'After my next compact', 'Only in new chats']
     const askWords = (ask ? `Context is already at ${ask.percent}%, past ${ask.at}%. Auto compact:`.length : 0) + ASK_LABELS.join('').length
     const isAskLine = width >= askWords * (Svg ? 0.8 : 1) + ASK_LABELS.length * (Svg ? 3 : 4) + 3
-    // the agent's hold, while Agent-timed is on: who holds, how long, why (cut short)
+    // the agent's hold, while Agent-timed is on: who holds, how long, and why, whole and
+    // wrapped (the tool keeps a reason to REASON_MAX)
     const held = timed ? agent.hold : null
-    const holdWords = held
-      ? `Held by Claude ${duration(now - held.since)}: ${held.reason.length > REASON_SHOWN ? `${held.reason.slice(0, REASON_SHOWN - 1)}…` : held.reason}`
-      : ''
+    const holdWords = held ? `Held by Claude ${duration(now - held.since)}: ${held.reason}` : ''
     // no hold, past the start %: the turn still running is what compaction waits on
     const waitingSince = timed && isBusy && !agent.hold ? (agent.waiting?.since ?? null) : null
     const HOLD_LABELS = ['Release']
