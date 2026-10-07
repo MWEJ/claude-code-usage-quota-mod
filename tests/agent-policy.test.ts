@@ -111,7 +111,7 @@ test('texts: every number names what it measures', () => {
   expect(figures(41.2, 30, 80)).toBe('Context 41%. Agent-timed compaction starts at 30%; at 80% it runs whatever is held.')
   expect(toldText(31, 30, 80)).toBe(
     'Agent-timed compaction: context is at 31% (starts at 30%, cap 80%). This conversation will be compacted when your turn ends. ' +
-      'If you are mid-task, call the compaction tool with action "hold" and a reason. Otherwise save a "note" of what must survive.',
+      'If you are mid-task, call the compaction tool with action "hold" and a reason. Otherwise save a "note" of what must survive. Asking the user a question does not end your turn.',
   )
 })
 

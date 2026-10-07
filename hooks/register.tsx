@@ -3,8 +3,8 @@ import type { EngineInterface, ModelForkResult, ModelUsage, Register, SessionRat
 
 import type { AgentTimed, AutoCompact, Category, Limit, PaceOf, Snapshot, Ttl, TtlChoice, Warm, WarmAnchor, WarmRate, WarmSetting, WarmTotals } from '../types'
 import {
-  AT_DEFAULT, DEFAULT_AUTO, EMPTY, REASON_SHOWN, START_DEFAULT, START_MIN, TOOL, TOOL_DESCRIPTION, TOOL_NAME, TOOL_SCHEMA,
-  afterText, answerTool, breakpointOf, breakpointText, capOf, decide, holdReminder, isTimed, nudgeLevel, nudgeText, startOf, stepNudge, toldText, withNote,
+  AT_DEFAULT, DEFAULT_AUTO, EMPTY, HOLD_REMIND_MS, REASON_SHOWN, START_DEFAULT, START_MIN, TOOL, TOOL_DESCRIPTION, TOOL_NAME, TOOL_SCHEMA,
+  afterText, answerTool, breakpointOf, breakpointText, capOf, decide, holdReminder, isTimed, nudgeLevel, nudgeText, startOf, stepNudge, toldText, waitReminder, withNote,
 } from './agent-policy'
 import type { Stuck, ToolInput } from './agent-policy'
 import {
@@ -673,8 +673,9 @@ async function dropAsked($: EngineInterface): Promise<void> {
 
 // What rides on a main-agent tool result: word that the start % is passed (once a
 // cycle), the reminders of a hold growing old, the five-minute ask for where a hold
-// stands, and a breakpoint after a commit or a passing test run (`command`: a Bash
-// command that succeeded, else null).
+// stands, the five-minute ask to end a turn compaction waits on with no hold, and a
+// breakpoint after a commit or a passing test run (`command`: a Bash command that
+// succeeded, else null).
 async function linesFor($: EngineInterface, command: string | null): Promise<string[]> {
   const auto = await read($, autoCompact)
   if (!isTimed(auto)) return []
@@ -707,7 +708,21 @@ async function linesFor($: EngineInterface, command: string | null): Promise<str
     lines.push(reminder.text)
     hold = reminder.state.hold
   }
-  if (told !== state.told || nudge !== state.nudge || hold !== state.hold) await update($, agentTimed, s => ({ ...s, told, nudge, hold }))
+  // past the start % with no hold, the running turn is what compaction waits on: the
+  // wait starts on the first tool result that finds it so, and is asked about from then
+  let waiting = state.waiting ?? null
+  if (hold || !isBusy || shown < startAt) waiting = null
+  else if (waiting === null) waiting = { since: now, remindAt: now + HOLD_REMIND_MS }
+  else {
+    const ask = waitReminder({ ...state, waiting }, now, percent, startAt, cap)
+    if (ask) {
+      lines.push(ask.text)
+      waiting = ask.state.waiting ?? null
+    }
+  }
+  if (told !== state.told || nudge !== state.nudge || hold !== state.hold || waiting !== (state.waiting ?? null)) {
+    await update($, agentTimed, s => ({ ...s, told, nudge, hold, waiting }))
+  }
   return lines
 }
 
@@ -1796,6 +1811,8 @@ export const register: Register = (on, options) => {
     spikeFrom = undefined
     // the turn is over: auto compact may fire now, never mid-reply
     isBusy = false
+    // and compaction no longer waits on it
+    if ((await read($, agentTimed)).waiting) await update($, agentTimed, s => ({ ...s, waiting: null }))
     // the cache chain stands on the turn's last response, read by the refresh just made
     await warmTurnEnd($, e.usage, endedAt)
     // interrupted or failed: what the agent asked for at this turn's end no longer stands
@@ -1955,6 +1972,8 @@ export const register: Register = (on, options) => {
     const holdWords = held
       ? `Held by Claude ${duration(now - held.since)}: ${held.reason.length > REASON_SHOWN ? `${held.reason.slice(0, REASON_SHOWN - 1)}…` : held.reason}`
       : ''
+    // no hold, past the start %: the turn still running is what compaction waits on
+    const waitingSince = timed && isBusy && !agent.hold ? (agent.waiting?.since ?? null) : null
     const HOLD_LABELS = ['Release']
     const isHoldLine = width >= (holdWords.length + HOLD_LABELS.join('').length) * (Svg ? 0.8 : 1) + HOLD_LABELS.length * (Svg ? 3 : 4) + 2
 
@@ -2296,6 +2315,11 @@ export const register: Register = (on, options) => {
               <Box marginTop={gap}>{holdButtons}</Box>
             </Box>
           )
+        ) : null}
+        {waitingSince !== null ? (
+          <Box marginBottom={gap}>
+            <Text color={MUTED} wrap="wrap">{`Compaction waiting on Claude's turn ${duration(now - waitingSince)}`}</Text>
+          </Box>
         ) : null}
         {timed && agent.isAsked ? (
           <Box marginBottom={gap}>

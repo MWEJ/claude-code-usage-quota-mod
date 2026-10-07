@@ -50,6 +50,7 @@ export const EMPTY: AgentTimed = {
   isAsked: false,
   told: 'no',
   nudge: { level: 0, calls: 0, isBreakpointSaid: false },
+  waiting: null,
   overridden: null,
 }
 
@@ -153,7 +154,7 @@ export function toldText(percent: number, startAt: number, cap: number): string 
   return (
     `Agent-timed compaction: context is at ${Math.round(percent)}% (starts at ${startAt}%, cap ${cap}%). ` +
     'This conversation will be compacted when your turn ends. ' +
-    'If you are mid-task, call the compaction tool with action "hold" and a reason. Otherwise save a "note" of what must survive.'
+    'If you are mid-task, call the compaction tool with action "hold" and a reason. Otherwise save a "note" of what must survive. Asking the user a question does not end your turn.'
   )
 }
 
@@ -176,6 +177,21 @@ export function holdReminder(state: AgentTimed, now: number, percent: number, st
     'Update the hold: call the compaction tool with action "hold" and the current reason to keep it, "release" if the fragile step is done, or "note" what must survive.\n' +
     figures(percent, startAt, cap)
   return { text, state: { ...state, hold: { ...state.hold, remindAt: now + HOLD_REMIND_MS } } }
+}
+
+// Past the start % with no hold, every HOLD_REMIND_MS of a turn that runs on, on the
+// next main tool result: compaction only runs between turns, so a turn that goes on
+// (asking the person questions included) holds it as surely as a hold does. `null`
+// while none is due; the state handed back is due again HOLD_REMIND_MS on.
+export function waitReminder(state: AgentTimed, now: number, percent: number, startAt: number, cap: number): { text: string; state: AgentTimed } | null {
+  const waiting = state.waiting
+  if (state.hold || !waiting || now < waiting.remindAt) return null
+  const waited = Math.max(1, Math.round((now - waiting.since) / 60_000))
+  const text =
+    `Agent-timed compaction: compaction has waited ${waited}m for this turn to end. It runs only between turns, and asking the user a question does not end the turn. ` +
+    'End the turn at a safe point, or call the compaction tool with action "hold" and a reason if the work is fragile.\n' +
+    figures(percent, startAt, cap)
+  return { text, state: { ...state, waiting: { ...waiting, remindAt: now + HOLD_REMIND_MS } } }
 }
 
 export function breakpointText(kind: 'commit' | 'tests'): string {
@@ -247,6 +263,7 @@ export function answerTool(state: AgentTimed, input: ToolInput, ctx: ToolContext
       ...state,
       hold,
       isAsked: false,
+      waiting: null,
       nudge: { ...state.nudge, isBreakpointSaid: false },
     })
   }

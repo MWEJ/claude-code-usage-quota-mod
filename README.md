@@ -117,6 +117,7 @@ What you see and keep:
 - While Claude holds, the band says so: *Held by Claude 12m: mid-refactor of auth*, with **Release** to overrule it, or **Compact now** to overrule it and compact.
 - Every **5 minutes** of a hold, Claude is asked where it stands: keep the hold with its current reason, release it, or leave a note.
 - Claude is told when the context passes the start %, so a compaction never comes unannounced.
+- Compaction only runs between turns, so a long turn holds it too, even with no hold set (asking you questions doesn't end the turn). The band shows *Compaction waiting on Claude's turn 6m*, and every **5 minutes** Claude is asked to end the turn at a safe point or hold with a reason.
 - While subagents Claude is waiting on are still running, compaction waits for them, up to your Auto compact %.
 - Only the main agent can hold. Subagents cannot.
 

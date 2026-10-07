@@ -108,7 +108,7 @@ test('past the start % the agent is told first: that turn end is skipped, the ne
   expect(seen.compacted).toEqual([])
   expect(rows(seen)).toEqual([
     'Agent-timed compaction: context is at 35% (starts at 30%, cap 80%). This conversation will be compacted when your turn ends. ' +
-      'If you are mid-task, call the compaction tool with action "hold" and a reason. Otherwise save a "note" of what must survive.',
+      'If you are mid-task, call the compaction tool with action "hold" and a reason. Otherwise save a "note" of what must survive. Asking the user a question does not end your turn.',
   ])
   // idle, it goes on waiting: the coming turn is the agent's chance to hold
   await clock.advance(9_000)
@@ -579,6 +579,81 @@ test('while holding: every 5 minutes the agent is asked where the hold stands, a
   await tool($, { action: 'release' })
   await clock.advance(10 * 60_000)
   expect(await bash($)).toEqual([])
+})
+
+test('past the start % with no hold, a turn that runs on is asked every 5 minutes to end; a hold or the turn end stops it', async ($, on) => {
+  const percent = { value: 20 }
+  const { clock } = world(on, percent)
+  await $.session.start(START)
+
+  await into($, clock, percent, 35)
+  // told on the first tool result, and the wait on the turn starts there
+  await bash($)
+  await clock.advance(4 * 60_000)
+  expect(await bash($)).toEqual([])
+  await clock.advance(60_000)
+  expect(await bash($)).toEqual([
+    'Agent-timed compaction: compaction has waited 5m for this turn to end. It runs only between turns, and asking the user a question does not end the turn. ' +
+      'End the turn at a safe point, or call the compaction tool with action "hold" and a reason if the work is fragile.\n' +
+      'Context 35%. Agent-timed compaction starts at 30%; at 80% it runs whatever is held.',
+  ])
+  // said once, then not until another 5 minutes have passed
+  expect(await bash($)).toEqual([])
+  await clock.advance(5 * 60_000)
+  expect(await bash($)).toEqual([expect.stringMatching(/^Agent-timed compaction: compaction has waited 10m for this turn to end/)])
+
+  // a hold takes over: its own ask, not this one
+  await tool($, { action: 'hold', reason: 'mid-refactor of auth' })
+  await clock.advance(5 * 60_000)
+  expect(await bash($)).toEqual([expect.stringMatching(/^Agent-timed compaction: you have held compaction for 5m/)])
+  // released mid-turn: the wait starts over from the release
+  await tool($, { action: 'release' })
+  await bash($)
+  await clock.advance(4 * 60_000)
+  expect(await bash($)).toEqual([])
+  await clock.advance(60_000)
+  expect(await bash($)).toEqual([expect.stringMatching(/^Agent-timed compaction: compaction has waited 5m/)])
+})
+
+test('a turn that ends is no wait: the next turn past the start % starts the clock over', async ($, on) => {
+  const percent = { value: 20 }
+  const { clock, seen } = world(on, percent)
+  // the context stays past the start % after compacting, so a later turn is past it too
+  seen.after = 40
+  await $.session.start(START)
+
+  await into($, clock, percent, 35)
+  await bash($)
+  await clock.advance(4 * 60_000)
+  await end($, clock)
+  // the next turn: told again (a compaction started the cycle over), and a fresh 5 minutes
+  await $.turn.start(GO)
+  await bash($)
+  await clock.advance(4 * 60_000)
+  expect(await bash($)).toEqual([])
+  await clock.advance(60_000)
+  expect(await bash($)).toEqual([expect.stringMatching(/^Agent-timed compaction: compaction has waited 5m/)])
+})
+
+test('the band: a turn running past the start % with no hold says how long compaction has waited on it', async ($, on) => {
+  const percent = { value: 20 }
+  const { clock } = world(on, percent)
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'headroom', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+
+  await into($, clock, percent, 35)
+  await bash($)
+  expect(await ui.find({ type: 'Text', text: "Compaction waiting on Claude's turn 0m" })).toBeDefined()
+  await clock.advance(6 * 60_000)
+  expect(await ui.find({ type: 'Text', text: "Compaction waiting on Claude's turn 6m" })).toBeDefined()
+  await tool($, { action: 'hold', reason: 'mid-refactor of auth' })
+  expect(await ui.find({ type: 'Text', text: /^Compaction waiting/ })).toBeUndefined()
+  await tool($, { action: 'release' })
+  await bash($)
+  expect(await ui.find({ type: 'Text', text: "Compaction waiting on Claude's turn 0m" })).toBeDefined()
+  await end($, clock)
+  expect(await ui.find({ type: 'Text', text: /^Compaction waiting/ })).toBeUndefined()
+  await ui.unmount()
 })
 
 test('a session started again in the same chat (a reload) keeps the hold and the note; another chat starts over', async ($, on) => {

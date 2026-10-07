@@ -38,6 +38,8 @@ export type AgentTimed = {
   told: 'no' | 'next' | 'yes'
   /** the highest nudge sent this cycle, main tool calls since, and the breakpoint hint */
   nudge: { level: number; calls: number; isBreakpointSaid: boolean }
+  /** past the start % with no hold, the running turn is what compaction waits on: since when, and when the agent is next asked to end it */
+  waiting?: { since: number; remindAt: number } | null
   /** a hold the cap ended, until the row after the compaction says so */
   overridden: { reason: string; percent: number } | null
 }
