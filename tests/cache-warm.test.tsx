@@ -231,14 +231,31 @@ test('no refresh while a limit is at or past warmUntil (85% by default)', async 
   expect(stops(seen)).toEqual(['5 Hour at 87%, past your 85%'])
 })
 
-test('warmUntil set higher lets it warm', { options: { warmUntil: 90 } }, async ($, on) => {
+test('a limit that reaches warmUntil while a refresh waits stops it before it runs', async ($, on) => {
+  const { clock, seen } = world(on, { limits: plan(10) })
+  await $.session.start(START)
+  await prompt($, clock, seen)
+  expect(schedules(seen)).toEqual([expect.stringMatching(/^54m \(1h, idle, expected saving \$/)])
+  // other chats spend the window while this one is idle
+  seen.limits = plan(85)
+  await clock.advance(54 * MIN)
+  expect(seen.forks).toEqual([])
+  expect(stops(seen)).toEqual(['5 Hour at 85%, past your 85%'])
+})
+
+test('warmUntil set higher lets it warm',{ options: { warmUntil: 90 } }, async ($, on) => {
   const { clock, seen } = world(on, { limits: plan(87) })
   await $.session.start(START)
   await prompt($, clock, seen)
   expect(schedules(seen)).toEqual([expect.stringMatching(/^54m \(1h, idle, expected saving \$/)])
+  await clock.advance(54 * MIN)
+  expect(seen.forks).toHaveLength(1)
+  expect(stops(seen)).toEqual([])
   // the /config row, set from the menu, applies to the warming under way
   await $.config.set({ key: 'headroom.warmUntil', value: 80 } as never)
   expect(stops(seen)).toEqual(['5 Hour at 87%, past your 80%'])
+  await clock.advance(54 * MIN)
+  expect(seen.forks).toHaveLength(1)
 })
 
 const LIFETIMES: [string, World, '5m' | '1h'][] = [
